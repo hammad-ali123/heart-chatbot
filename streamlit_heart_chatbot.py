@@ -6,31 +6,21 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
-import os
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
 
 # Load model and scaler
 model = joblib.load("model.pkl")
 scaler = joblib.load("scaler.pkl")
-CSV_FILE = "prediction_history.csv"
 
 # SHAP explainer for XGBoost
 explainer = shap.TreeExplainer(model)
 
-# Save prediction (kept for internal logging; no public download button)
-def save_prediction(data, prediction):
-    data["prediction (%)"] = round(prediction, 2)
-    data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    df = pd.DataFrame([data])
-    if os.path.exists(CSV_FILE):
-        df.to_csv(CSV_FILE, mode='a', header=False, index=False)
-    else:
-        df.to_csv(CSV_FILE, mode='w', header=True, index=False)
-
-# Generate PDF report
-def generate_pdf(input_data, prediction):
+# Generate PDF report with SHAP breakdown
+def generate_pdf(input_data, prediction, shap_values, features):
     field_names = {
         "age": "Age",
         "sex": "Sex (0=Female, 1=Male)",
@@ -46,20 +36,50 @@ def generate_pdf(input_data, prediction):
         "ca": "Major Vessels Coloured (0–4)",
         "thal": "Thalassemia (0=Normal, 1=Fixed, 2=Reversible)"
     }
+
     buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=letter)
-    text = c.beginText(40, 750)
-    text.setFont("Helvetica", 12)
-    text.textLine("Heart Disease Risk Assessment Report")
-    text.textLine("--------------------------------------")
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
+    elements = []
+
+    # Title
+    elements.append(Paragraph("Heart Disease Risk Assessment Report", styles['Title']))
+    elements.append(Spacer(1, 12))
+
+    # Input data
+    elements.append(Paragraph("<b>Input Data:</b>", styles['Heading2']))
     for key, value in input_data.items():
         label = field_names.get(key, key)
-        text.textLine(f"{label}: {value}")
-    text.textLine(f"\nPredicted Risk: {round(prediction, 2)}%")
-    text.textLine(f"Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    c.drawText(text)
-    c.showPage()
-    c.save()
+        elements.append(Paragraph(f"{label}: {value}", styles['Normal']))
+    elements.append(Spacer(1, 12))
+
+    # Prediction
+    elements.append(Paragraph(f"<b>Predicted Risk:</b> {round(prediction, 2)}%", styles['Heading2']))
+    elements.append(Paragraph(f"Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+    elements.append(Spacer(1, 20))
+
+    # SHAP breakdown table
+    elements.append(Paragraph("<b>Feature Contributions (SHAP Analysis)</b>", styles['Heading2']))
+    shap_df = pd.DataFrame({
+        "Feature": features,
+        "Value": [input_data[f] for f in features],
+        "SHAP": shap_values[0]
+    }).sort_values("SHAP", key=abs, ascending=False)
+
+    table_data = [["Feature", "Value", "SHAP Impact"]]
+    for _, row in shap_df.iterrows():
+        table_data.append([row["Feature"], row["Value"], f"{row['SHAP']:.3f}"])
+
+    table = Table(table_data, hAlign='LEFT')
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey)
+    ]))
+    elements.append(table)
+
+    doc.build(elements)
     buffer.seek(0)
     return buffer
 
@@ -80,7 +100,7 @@ CONSTRAINTS = {
     "thal":     {"type": int,   "choices": [0, 1, 2]},
 }
 
-# Questions with integrated valid ranges/choices
+# Questions with integrated ranges
 questions = [
     {"key": "age",      "text": "What is your age (18–100)?",                              "type": int},
     {"key": "sex",      "text": "What is your biological sex (0 = Female, 1 = Male)?",     "type": int},
@@ -97,8 +117,8 @@ questions = [
     {"key": "thal",     "text": "Thalassemia (0=Normal, 1=Fixed, 2=Reversible)?",          "type": int}
 ]
 
+# Validate input
 def coerce_and_validate(key: str, raw_text: str):
-    """Cast input to the right dtype and enforce feasible ranges/choices."""
     spec = CONSTRAINTS[key]
     caster = spec["type"]
     val = caster(raw_text)
@@ -112,7 +132,7 @@ def coerce_and_validate(key: str, raw_text: str):
             raise ValueError(f"Value must be between {lo} and {hi}.")
     return val
 
-# Session states
+# Session state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "current_q" not in st.session_state:
@@ -123,7 +143,7 @@ if "answers" not in st.session_state:
 # Title
 st.title("💬 Heart Disease Risk Chatbot (Chat Mode)")
 
-# Display chat
+# Display chat history
 for i, msg in enumerate(st.session_state.chat_history):
     message(msg["text"], is_user=msg["is_user"], key=f"{'user' if msg['is_user'] else 'bot'}-{i}")
 
@@ -147,8 +167,8 @@ else:
     inputs = [st.session_state.answers[q["key"]] for q in questions]
     input_array = scaler.transform([inputs])
     prediction = model.predict_proba(input_array)[0][1] * 100
-    save_prediction(st.session_state.answers, prediction)
 
+    # Display prediction
     st.success(f"🧠 Your predicted heart disease risk is **{round(prediction, 2)}%**.")
     if prediction > 70:
         st.warning("⚠️ High risk! Please consult a doctor.")
@@ -168,20 +188,4 @@ else:
     # SHAP bar plot
     st.markdown("### 🧠 Feature Contributions (Explainability)")
     shap_values = explainer.shap_values(input_array)
-    shap_df = pd.DataFrame({
-        "feature": [q["key"] for q in questions],
-        "value": input_array[0],
-        "shap": shap_values[0]
-    }).sort_values("shap", key=abs, ascending=False)
-
-    fig2, ax2 = plt.subplots(figsize=(8, 5))
-    ax2.barh(shap_df["feature"], shap_df["shap"],
-             color=["red" if x > 0 else "blue" for x in shap_df["shap"]])
-    ax2.set_xlabel("SHAP Value (Impact on Prediction)")
-    ax2.set_title("Top Feature Influences on Risk")
-    st.pyplot(fig2)
-
-    # PDF download only (removed "Download All Predictions")
-    pdf = generate_pdf(st.session_state.answers, prediction)
-    st.download_button("📄 Download PDF Report", data=pdf,
-                       file_name="heart_risk_report.pdf", mime="application/pdf")
+    shap_d_
