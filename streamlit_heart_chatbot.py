@@ -19,7 +19,7 @@ CSV_FILE = "prediction_history.csv"
 # SHAP explainer for XGBoost
 explainer = shap.TreeExplainer(model)
 
-# Save prediction
+# Save prediction (kept for internal logging; no public download button)
 def save_prediction(data, prediction):
     data["prediction (%)"] = round(prediction, 2)
     data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -82,19 +82,19 @@ CONSTRAINTS = {
 
 # Questions with integrated valid ranges/choices
 questions = [
-    {"key": "age", "text": "What is your age (18–100)?", "type": int},
-    {"key": "sex", "text": "What is your biological sex (0 = Female, 1 = Male)?", "type": int},
-    {"key": "cp", "text": "What is your chest pain type (0–3)?", "type": int},
-    {"key": "trestbps", "text": "Resting blood pressure (80–220 mm Hg)?", "type": int},
-    {"key": "chol", "text": "Cholesterol level (100–700 mg/dl)?", "type": int},
-    {"key": "fbs", "text": "Fasting blood sugar > 120 mg/dl (0 = No, 1 = Yes)?", "type": int},
-    {"key": "restecg", "text": "Resting ECG result (0–2)?", "type": int},
-    {"key": "thalach", "text": "Maximum heart rate achieved (60–230)?", "type": int},
-    {"key": "exang", "text": "Exercise-induced angina (0 = No, 1 = Yes)?", "type": int},
-    {"key": "oldpeak", "text": "ST depression induced by exercise (0.0–7.0)?", "type": float},
-    {"key": "slope", "text": "Slope of peak ST segment (0–2)?", "type": int},
-    {"key": "ca", "text": "Number of major vessels coloured (0–4)?", "type": int},
-    {"key": "thal", "text": "Thalassemia (0=Normal, 1=Fixed, 2=Reversible)?", "type": int}
+    {"key": "age",      "text": "What is your age (18–100)?",                              "type": int},
+    {"key": "sex",      "text": "What is your biological sex (0 = Female, 1 = Male)?",     "type": int},
+    {"key": "cp",       "text": "What is your chest pain type (0–3)?",                     "type": int},
+    {"key": "trestbps", "text": "Resting blood pressure (80–220 mm Hg)?",                  "type": int},
+    {"key": "chol",     "text": "Cholesterol level (100–700 mg/dl)?",                      "type": int},
+    {"key": "fbs",      "text": "Fasting blood sugar > 120 mg/dl (0 = No, 1 = Yes)?",      "type": int},
+    {"key": "restecg",  "text": "Resting ECG result (0–2)?",                               "type": int},
+    {"key": "thalach",  "text": "Maximum heart rate achieved (60–230)?",                   "type": int},
+    {"key": "exang",    "text": "Exercise-induced angina (0 = No, 1 = Yes)?",              "type": int},
+    {"key": "oldpeak",  "text": "ST depression induced by exercise (0.0–7.0)?",            "type": float},
+    {"key": "slope",    "text": "Slope of peak ST segment (0–2)?",                         "type": int},
+    {"key": "ca",       "text": "Number of major vessels coloured (0–4)?",                 "type": int},
+    {"key": "thal",     "text": "Thalassemia (0=Normal, 1=Fixed, 2=Reversible)?",          "type": int}
 ]
 
 def coerce_and_validate(key: str, raw_text: str):
@@ -181,12 +181,7 @@ else:
     ax2.set_title("Top Feature Influences on Risk")
     st.pyplot(fig2)
 
-    # PDF
+    # PDF download only (removed "Download All Predictions")
     pdf = generate_pdf(st.session_state.answers, prediction)
     st.download_button("📄 Download PDF Report", data=pdf,
                        file_name="heart_risk_report.pdf", mime="application/pdf")
-
-    # CSV
-    if os.path.exists(CSV_FILE):
-        with open(CSV_FILE, "rb") as f:
-            st.download_button("📥 Download All Predictions", f, file_name=CSV_FILE)
