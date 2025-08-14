@@ -89,7 +89,7 @@ if "answers" not in st.session_state:
     st.session_state.answers = {}
 
 # Title
-st.title("💬 Heart Disease Risk Chatbot (Chat Mode)")
+st.title("💬 Heart Disease Risk Chatbot")
 
 # Display chat
 for i, msg in enumerate(st.session_state.chat_history):
