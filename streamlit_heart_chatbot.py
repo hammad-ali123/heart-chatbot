@@ -43,7 +43,7 @@ def generate_pdf(input_data, prediction):
         "exang": "Exercise-Induced Angina (0=No, 1=Yes)",
         "oldpeak": "ST Depression by Exercise",
         "slope": "Slope of Peak Exercise ST",
-        "ca": "Major Vessels Colored (0–4)",
+        "ca": "Major Vessels Coloured (0–4)",
         "thal": "Thalassemia (0=Normal, 1=Fixed, 2=Reversible)"
     }
     buffer = BytesIO()
@@ -63,7 +63,7 @@ def generate_pdf(input_data, prediction):
     buffer.seek(0)
     return buffer
 
-# Questions
+# Questions (base text)
 questions = [
     {"key": "age", "text": "What is your age?", "type": int},
     {"key": "sex", "text": "What is your biological sex? (0 = Female, 1 = Male)", "type": int},
@@ -80,7 +80,7 @@ questions = [
     {"key": "thal", "text": "Thalassemia? (0=Normal, 1=Fixed, 2=Reversible)", "type": int}
 ]
 
-# Constraints for validation
+# Constraints for validation (and to display in chat)
 CONSTRAINTS = {
     "age":      {"type": int,   "min": 18,  "max": 100},
     "sex":      {"type": int,   "choices": [0, 1]},
@@ -97,7 +97,23 @@ CONSTRAINTS = {
     "thal":     {"type": int,   "choices": [0, 1, 2]},
 }
 
+def format_constraint(key: str) -> str:
+    """Return a human-readable string of valid values for display in the chat."""
+    spec = CONSTRAINTS[key]
+    if "choices" in spec:
+        return f"(Valid values: {', '.join(map(str, spec['choices']))})"
+    lo = spec.get("min", None)
+    hi = spec.get("max", None)
+    if lo is not None and hi is not None:
+        return f"(Valid range: {lo}–{hi})"
+    if lo is not None:
+        return f"(Minimum: {lo})"
+    if hi is not None:
+        return f"(Maximum: {hi})"
+    return ""
+
 def coerce_and_validate(key: str, raw_text: str):
+    """Cast input to the right dtype and enforce feasible ranges/choices."""
     spec = CONSTRAINTS[key]
     caster = spec["type"]
     val = caster(raw_text)
@@ -111,7 +127,7 @@ def coerce_and_validate(key: str, raw_text: str):
             raise ValueError(f"Value must be between {lo} and {hi}.")
     return val
 
-# Session states
+# Session state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "current_q" not in st.session_state:
@@ -122,19 +138,25 @@ if "answers" not in st.session_state:
 # Title
 st.title("💬 Heart Disease Risk Chatbot (Chat Mode)")
 
-# Display chat
+# Display prior messages
 for i, msg in enumerate(st.session_state.chat_history):
     message(msg["text"], is_user=msg["is_user"], key=f"{'user' if msg['is_user'] else 'bot'}-{i}")
 
 # Ask questions
 if st.session_state.current_q < len(questions):
     q = questions[st.session_state.current_q]
-    user_input = st.chat_input(q["text"])
+    # Build a prompt that includes the valid range/choices
+    constraint_hint = format_constraint(q["key"])
+    prompt = f"{q['text']} {constraint_hint}".strip()
+    user_input = st.chat_input(prompt)
+
+    # When the user responds
     if user_input:
         try:
             typed_input = coerce_and_validate(q["key"], user_input)
             st.session_state.answers[q["key"]] = typed_input
-            st.session_state.chat_history.append({"text": q["text"], "is_user": False})
+            # Show the bot's question including the valid range/choices
+            st.session_state.chat_history.append({"text": prompt, "is_user": False})
             st.session_state.chat_history.append({"text": user_input, "is_user": True})
             st.session_state.current_q += 1
             st.rerun()
@@ -174,7 +196,8 @@ else:
     }).sort_values("shap", key=abs, ascending=False)
 
     fig2, ax2 = plt.subplots(figsize=(8, 5))
-    bars = ax2.barh(shap_df["feature"], shap_df["shap"], color=["red" if x > 0 else "blue" for x in shap_df["shap"]])
+    ax2.barh(shap_df["feature"], shap_df["shap"],
+             color=["red" if x > 0 else "blue" for x in shap_df["shap"]])
     ax2.set_xlabel("SHAP Value (Impact on Prediction)")
     ax2.set_title("Top Feature Influences on Risk")
     st.pyplot(fig2)
