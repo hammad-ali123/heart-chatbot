@@ -80,6 +80,37 @@ questions = [
     {"key": "thal", "text": "Thalassemia? (0=Normal, 1=Fixed, 2=Reversible)", "type": int}
 ]
 
+# Constraints for validation
+CONSTRAINTS = {
+    "age":      {"type": int,   "min": 18,  "max": 100},
+    "sex":      {"type": int,   "choices": [0, 1]},
+    "cp":       {"type": int,   "min": 0,   "max": 3},
+    "trestbps": {"type": int,   "min": 80,  "max": 220},
+    "chol":     {"type": int,   "min": 100, "max": 700},
+    "fbs":      {"type": int,   "choices": [0, 1]},
+    "restecg":  {"type": int,   "choices": [0, 1, 2]},
+    "thalach":  {"type": int,   "min": 60,  "max": 230},
+    "exang":    {"type": int,   "choices": [0, 1]},
+    "oldpeak":  {"type": float, "min": 0.0, "max": 7.0},
+    "slope":    {"type": int,   "choices": [0, 1, 2]},
+    "ca":       {"type": int,   "min": 0,   "max": 4},
+    "thal":     {"type": int,   "choices": [0, 1, 2]},
+}
+
+def coerce_and_validate(key: str, raw_text: str):
+    spec = CONSTRAINTS[key]
+    caster = spec["type"]
+    val = caster(raw_text)
+    if "choices" in spec:
+        if val not in spec["choices"]:
+            raise ValueError(f"Value must be one of {spec['choices']}.")
+    else:
+        if ("min" in spec and val < spec["min"]) or ("max" in spec and val > spec["max"]):
+            lo = spec.get("min", "-∞")
+            hi = spec.get("max", "+∞")
+            raise ValueError(f"Value must be between {lo} and {hi}.")
+    return val
+
 # Session states
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
@@ -89,7 +120,7 @@ if "answers" not in st.session_state:
     st.session_state.answers = {}
 
 # Title
-st.title("💬 Heart Disease Risk Chatbot")
+st.title("💬 Heart Disease Risk Chatbot (Chat Mode)")
 
 # Display chat
 for i, msg in enumerate(st.session_state.chat_history):
@@ -101,14 +132,14 @@ if st.session_state.current_q < len(questions):
     user_input = st.chat_input(q["text"])
     if user_input:
         try:
-            typed_input = q["type"](user_input)
+            typed_input = coerce_and_validate(q["key"], user_input)
             st.session_state.answers[q["key"]] = typed_input
             st.session_state.chat_history.append({"text": q["text"], "is_user": False})
             st.session_state.chat_history.append({"text": user_input, "is_user": True})
             st.session_state.current_q += 1
             st.rerun()
-        except ValueError:
-            st.warning("Please enter a valid value.")
+        except ValueError as e:
+            st.warning(f"Please enter a valid value. {e}")
 
 # After final answer
 else:
