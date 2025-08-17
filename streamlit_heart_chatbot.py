@@ -13,6 +13,11 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 
 # -----------------------------
+# Page config (optional but nice)
+# -----------------------------
+st.set_page_config(page_title="Heart Disease Risk Chatbot", page_icon="💬", layout="centered")
+
+# -----------------------------
 # Validation constraints & Qs
 # -----------------------------
 CONSTRAINTS = {
@@ -50,85 +55,73 @@ FEATURE_ORDER = [q["key"] for q in questions]
 N_FEATURES = len(FEATURE_ORDER)
 
 # -----------------------------
+# Descriptive labels (used in chart + PDF)
+# -----------------------------
+FIELD_NAMES = {
+    "age": "Age (years)",
+    "sex": "Sex (0=Female, 1=Male)",
+    "cp": "Chest Pain Type (0–3)",
+    "trestbps": "Resting Blood Pressure (80–220 mm Hg)",
+    "chol": "Cholesterol Level (100–700 mg/dl)",
+    "fbs": "Fasting Blood Sugar > 120 (0=No, 1=Yes)",
+    "restecg": "Resting ECG Result (0–2)",
+    "thalach": "Max Heart Rate Achieved (60–230)",
+    "exang": "Exercise-Induced Angina (0=No, 1=Yes)",
+    "oldpeak": "ST Depression by Exercise (0.0–7.0)",
+    "slope": "Slope of Peak Exercise ST (0–2)",
+    "ca": "Major Vessels Coloured (0–4)",
+    "thal": "Thalassemia (0=Normal, 1=Fixed, 2=Reversible)"
+}
+
+# -----------------------------
 # Load model & scaler
 # -----------------------------
-model = joblib.load("model.pkl")     # LogisticRegression
-scaler = joblib.load("scaler.pkl")   # Typically StandardScaler
+# These filenames should match what you exported from training (RF, LR, etc.)
+model = joblib.load("model.pkl")
+scaler = joblib.load("scaler.pkl")
 
 # -----------------------------
-# SHAP explainer (fix)
+# SHAP explainer (robust across versions)
 # -----------------------------
-# We use a zero-centred background in *model input space*.
-# If you used StandardScaler, a zero vector corresponds to average (mean) patient.
-# This keeps explanations stable without needing training data here.
+# Using a zero-centered background in *model input space*; with StandardScaler
+# a zero vector corresponds to an "average" patient, keeping explanations stable.
 zero_background = np.zeros((1, N_FEATURES))
-
-# Try the unified API first; fall back to LinearExplainer for older SHAP.
 try:
     masker = shap.maskers.Independent(zero_background)
     explainer = shap.Explainer(model, masker)
 except Exception:
-    # Older SHAP versions: LinearExplainer(model, background)
+    # Older SHAP versions fallback
     explainer = shap.LinearExplainer(model, zero_background)
 
 def normalise_shap_values(shap_out):
-    """
-    Return a 1D numpy array for the first (and only) sample's SHAP values,
-    regardless of SHAP version/backend.
-    """
-    # Newer SHAP: explainer(X) returns an Explanation object
+    """Return a 1D numpy array of SHAP values for the single input row, across SHAP versions."""
     if hasattr(shap_out, "values") and hasattr(shap_out, "data"):
-        # shap_out.values shape: (n_samples, n_features)
         return np.array(shap_out.values[0], dtype=float)
-
-    # Older SHAP .shap_values(...) might return:
-    # - np.ndarray of shape (n_samples, n_features)
-    # - list of arrays (multiclass). For binary logistic regression,
-    #   we typically get a single array.
     if isinstance(shap_out, np.ndarray):
         if shap_out.ndim == 2 and shap_out.shape[0] >= 1:
             return np.array(shap_out[0], dtype=float)
-        raise ValueError("Unexpected SHAP ndarray shape.")
     if isinstance(shap_out, list) and len(shap_out) > 0:
         arr = shap_out[0]
-        if isinstance(arr, np.ndarray):
-            if arr.ndim == 2 and arr.shape[0] >= 1:
-                return np.array(arr[0], dtype=float)
+        if isinstance(arr, np.ndarray) and arr.ndim == 2 and arr.shape[0] >= 1:
+            return np.array(arr[0], dtype=float)
     raise ValueError("Unrecognised SHAP output format.")
 
 # -----------------------------
 # PDF generator with SHAP table
 # -----------------------------
 def generate_pdf(input_data, prediction, shap_values_1d, features):
-    field_names = {
-        "age": "Age (years)",
-        "sex": "Sex (0=Female, 1=Male)",
-        "cp": "Chest Pain Type (0–3)",
-        "trestbps": "Resting Blood Pressure (80–220 mm Hg)",
-        "chol": "Cholesterol Level (100–700 mg/dl)",
-        "fbs": "Fasting Blood Sugar > 120 (0=No, 1=Yes)",
-        "restecg": "Resting ECG Result (0–2)",
-        "thalach": "Max Heart Rate Achieved (60–230)",
-        "exang": "Exercise-Induced Angina (0=No, 1=Yes)",
-        "oldpeak": "ST Depression by Exercise (0.0–7.0)",
-        "slope": "Slope of Peak Exercise ST (0–2)",
-        "ca": "Major Vessels Coloured (0–4)",
-        "thal": "Thalassemia (0=Normal, 1=Fixed, 2=Reversible)"
-    }
-
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter)
     styles = getSampleStyleSheet()
     elements = []
 
-    # Title
     elements.append(Paragraph("Heart Disease Risk Assessment Report", styles['Title']))
     elements.append(Spacer(1, 12))
 
     # Input data
     elements.append(Paragraph("<b>Input Data:</b>", styles['Heading2']))
     for key, value in input_data.items():
-        label = field_names.get(key, key)
+        label = FIELD_NAMES.get(key, key)
         elements.append(Paragraph(f"{label}: {value}", styles['Normal']))
     elements.append(Spacer(1, 12))
 
@@ -137,11 +130,11 @@ def generate_pdf(input_data, prediction, shap_values_1d, features):
     elements.append(Paragraph(f"Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
     elements.append(Spacer(1, 20))
 
-    # SHAP breakdown table
+    # SHAP breakdown table (Code + Full name + Value + Impact)
     elements.append(Paragraph("<b>Feature Contributions (SHAP Analysis)</b>", styles['Heading2']))
     shap_df = pd.DataFrame({
         "Code": features,
-        "Feature": [field_names.get(f, f) for f in features],
+        "Feature": [FIELD_NAMES.get(f, f) for f in features],
         "Value": [input_data[f] for f in features],
         "SHAP": shap_values_1d
     }).sort_values("SHAP", key=abs, ascending=False)
@@ -156,7 +149,7 @@ def generate_pdf(input_data, prediction, shap_values_1d, features):
             Paragraph(f'<font color="{ "red" if shap_val > 0 else "blue" }">{shap_val:.3f}</font>', styles['Normal'])
         ])
 
-    table = Table(table_data, hAlign='LEFT', colWidths=[50, 250, 50, 80])
+    table = Table(table_data, hAlign='LEFT', colWidths=[60, 260, 60, 90])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
@@ -242,22 +235,22 @@ else:
     _ax1.axis("equal")
     st.pyplot(fig1)
 
-    # SHAP explainability (fixed)
+    # SHAP explainability
     st.markdown("### 🧠 Feature Contributions (Explainability)")
-    # Try unified API call first; if it fails, fall back to .shap_values(...)
     try:
         shap_raw = explainer(input_scaled)
     except Exception:
         shap_raw = explainer.shap_values(input_scaled)
     shap_1d = normalise_shap_values(shap_raw)
 
+    # --- Use FULL descriptive names on the chart ---
     shap_df = pd.DataFrame({
-        "feature": FEATURE_ORDER,
+        "feature": [FIELD_NAMES.get(f, f) for f in FEATURE_ORDER],
         "value": [st.session_state.answers[k] for k in FEATURE_ORDER],
         "shap": shap_1d
     }).sort_values("shap", key=abs, ascending=False)
 
-    fig2, ax2 = plt.subplots(figsize=(8, 5))
+    fig2, ax2 = plt.subplots(figsize=(8, 6))
     ax2.barh(shap_df["feature"], shap_df["shap"],
              color=["red" if x > 0 else "blue" for x in shap_df["shap"]])
     ax2.set_xlabel("SHAP Value (Impact on Prediction)")
@@ -265,7 +258,7 @@ else:
     ax2.invert_yaxis()
     st.pyplot(fig2)
 
-    # PDF download with SHAP table
+    # PDF download with SHAP table (already full names)
     pdf = generate_pdf(st.session_state.answers, prediction, shap_1d, FEATURE_ORDER)
     st.download_button("📄 Download PDF Report", data=pdf,
                        file_name="heart_risk_report.pdf", mime="application/pdf")
