@@ -200,7 +200,7 @@ if "answers" not in st.session_state:
 # -----------------------------
 # UI
 # -----------------------------
-st.title("💬 Heart Disease Risk Chatbot (Chat Mode)")
+st.title("💬 Heart Disease Risk Chatbot")
 
 for i, msg in enumerate(st.session_state.chat_history):
     message(msg["text"], is_user=msg["is_user"], key=f"{'user' if msg['is_user'] else 'bot'}-{i}")
