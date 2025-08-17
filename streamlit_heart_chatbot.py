@@ -100,13 +100,18 @@ def normalise_shap_values(shap_out):
 # PDF generator with SHAP table
 # -----------------------------
 def generate_pdf(input_data, prediction, shap_values_1d, features):
-    field_names = {
-        "age": "Age (years)",
-        "sex": "Sex (0=Female, 1=Male)",
-        "cp": "Chest Pain Type (0–3)",
-        "trestbps": "Resting Blood Pressure (80–220 mm Hg)",
-        "chol": "Cholesterol Level (100–700 mg/dl)",
-        "fbs": "Fasting Blood Sugar > 120 (0=No, 1=Yes)",
-        "restecg": "Resting ECG Result (0–2)",
-        "thalach": "Max Heart Rate Achieved (60–230)",
-        "exang": "Exercise-Induced A
+field_names = {
+    "age": "Age (years)",
+    "sex": "Sex (0=Female, 1=Male)",
+    "cp": "Chest Pain Type (0–3)",
+    "trestbps": "Resting Blood Pressure (80–220 mm Hg)",
+    "chol": "Cholesterol Level (100–700 mg/dl)",
+    "fbs": "Fasting Blood Sugar > 120 (0=No, 1=Yes)",
+    "restecg": "Resting ECG Result (0–2)",
+    "thalach": "Max Heart Rate Achieved (60–230)",
+    "exang": "Exercise-Induced Angina (0=No, 1=Yes)",
+    "oldpeak": "ST Depression by Exercise (0.0–7.0)",
+    "slope": "Slope of Peak Exercise ST (0–2)",
+    "ca": "Major Vessels Coloured (0–4)",
+    "thal": "Thalassemia (0=Normal, 1=Fixed, 2=Reversible)"
+}
