@@ -226,43 +226,34 @@ else:
     # -----------------------------
     # SHAP explainability
     # -----------------------------
-    st.markdown("### 🧠 Feature Contributions (Explainability)")
-    try:
-        shap_raw = explainer(input_scaled)
-    except Exception:
-        shap_raw = explainer.shap_values(input_scaled)
+    # --- SHAP explainability ---
+st.markdown("### 🧠 Feature Contributions (Explainability)")
+try:
+    shap_raw = explainer(input_scaled)
+except Exception:
+    shap_raw = explainer.shap_values(input_scaled)
 
-    shap_1d = shap_to_1d(shap_raw)
+shap_1d = shap_to_1d(shap_raw)
 
-    n_feat = len(FEATURE_ORDER)
-    if shap_1d.ndim != 1:
-        shap_1d = np.ravel(shap_1d)
-    if len(shap_1d) > n_feat:
-        try:
-            shap_1d = shap_1d.reshape(-1, n_feat)[-1]
-        except Exception:
-            shap_1d = shap_1d[:n_feat]
-    elif len(shap_1d) < n_feat:
-        shap_1d = np.pad(shap_1d, (0, n_feat - len(shap_1d)), mode="constant")
+# Build full DataFrame with all 13 features
+shap_df = pd.DataFrame({
+    "feature": FEATURE_ORDER,
+    "value": [st.session_state.answers[k] for k in FEATURE_ORDER],
+    "shap": shap_1d
+}).sort_values("shap", key=abs, ascending=False)
 
-    rows = []
-    for i, feat in enumerate(FEATURE_ORDER):
-        rows.append({
-            "feature": feat,
-            "value": st.session_state.answers[feat],
-            "shap": float(shap_1d[i])
-        })
-    shap_df = pd.DataFrame(rows).sort_values("shap", key=abs, ascending=False)
+# Plot
+fig2, ax2 = plt.subplots(figsize=(8, 5))
+ax2.barh(shap_df["feature"], shap_df["shap"],
+         color=["red" if x > 0 else "blue" for x in shap_df["shap"]])
+ax2.set_xlabel("SHAP Value (Impact on Prediction)")
+ax2.set_title("Top Feature Influences on Risk")
+ax2.invert_yaxis()
+st.pyplot(fig2)
 
-    fig2, ax2 = plt.subplots(figsize=(8, 5))
-    ax2.barh(shap_df["feature"], shap_df["shap"],
-             color=["red" if x > 0 else "blue" for x in shap_df["shap"]])
-    ax2.set_xlabel("SHAP Value (Impact on Prediction)")
-    ax2.set_title("Top Feature Influences on Risk")
-    ax2.invert_yaxis()
-    st.pyplot(fig2)
-
-    # PDF download with SHAP table
-    pdf = generate_pdf(st.session_state.answers, prediction, np.asarray(shap_1d, dtype=float), FEATURE_ORDER)
-    st.download_button("📄 Download PDF Report", data=pdf,
-                       file_name="heart_risk_report.pdf", mime="application/pdf")
+# PDF report (pass shap_1d directly)
+pdf = generate_pdf(st.session_state.answers, prediction,
+                   np.asarray(shap_1d, dtype=float),
+                   FEATURE_ORDER)
+st.download_button("📄 Download PDF Report", data=pdf,
+                   file_name="heart_risk_report.pdf", mime="application/pdf")
