@@ -58,12 +58,14 @@ scaler = joblib.load("scaler.pkl")   # Typically StandardScaler
 # -----------------------------
 # SHAP explainer
 # -----------------------------
-zero_background = np.zeros((1, N_FEATURES))
+# Create a synthetic background (50 samples around mean = 0 in scaled space)
+background = np.random.normal(0, 1, (50, N_FEATURES))
+
 try:
-    masker = shap.maskers.Independent(zero_background)
+    masker = shap.maskers.Independent(background)
     explainer = shap.Explainer(model, masker)
 except Exception:
-    explainer = shap.LinearExplainer(model, zero_background)
+    explainer = shap.LinearExplainer(model, background)
 
 def shap_to_1d(shap_raw):
     import numpy as np
