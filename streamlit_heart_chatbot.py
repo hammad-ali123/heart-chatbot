@@ -58,7 +58,7 @@ scaler = joblib.load("scaler.pkl")   # Typically StandardScaler
 # -----------------------------
 # SHAP explainer (fix)
 # -----------------------------
-# We use a zero-centred background in *model input space*.
+# We use a zero-centred background in model input space.
 # If you used StandardScaler, a zero vector corresponds to average (mean) patient.
 # This keeps explanations stable without needing training data here.
 zero_background = np.zeros((1, N_FEATURES))
@@ -226,9 +226,9 @@ else:
     prediction = model.predict_proba(input_scaled)[0][1] * 100
 
     # Risk message
-    st.success(f"🧠 Your predicted heart disease risk is **{round(prediction, 2)}%**.")
+    st.success(f"🧠 Your predicted heart disease risk is *{round(prediction, 2)}%*.")
     if prediction > 70:
-        st.warning("⚠️ High risk! Please consult a doctor.")
+        st.warning("⚠ High risk! Please consult a doctor.")
     elif prediction > 40:
         st.info("🔍 Moderate risk. A check-up is recommended.")
     else:
