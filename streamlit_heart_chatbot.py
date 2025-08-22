@@ -56,34 +56,33 @@ model = joblib.load("model.pkl")     # LogisticRegression (or your chosen model)
 scaler = joblib.load("scaler.pkl")   # Typically StandardScaler
 
 # -----------------------------
-# SHAP explainer
+# SHAP explainer (fix)
 # -----------------------------
-# Create a synthetic background (50 samples around mean = 0 in scaled space)
-background = np.random.normal(0, 1, (50, N_FEATURES))
-
+zero_background = np.zeros((1, N_FEATURES))
 try:
-    masker = shap.maskers.Independent(background)
+    masker = shap.maskers.Independent(zero_background)
     explainer = shap.Explainer(model, masker)
 except Exception:
-    explainer = shap.LinearExplainer(model, background)
+    explainer = shap.LinearExplainer(model, zero_background)
 
 def shap_to_1d(shap_raw):
-    import numpy as np
+    """Normalize SHAP output to 1-D numpy array of length n_features."""
     if hasattr(shap_raw, "values"):
         vals = np.array(shap_raw.values)
         if vals.ndim == 3 and vals.shape[0] == 1 and vals.shape[1] >= 2:
-            out = vals[0, 1, :]
+            return vals[0, 1, :].astype(float)
         elif vals.ndim == 2 and vals.shape[0] == 1:
-            out = vals[0, :]
+            return vals[0, :].astype(float)
         else:
-            out = vals.reshape(-1)
-        return out.astype(float)
+            return vals.reshape(-1).astype(float)
+
     if isinstance(shap_raw, list) and len(shap_raw) > 0:
         arr = shap_raw[1] if len(shap_raw) > 1 else shap_raw[0]
         arr = np.array(arr)
         if arr.ndim == 2 and arr.shape[0] == 1:
             arr = arr[0, :]
         return arr.reshape(-1).astype(float)
+
     arr = np.array(shap_raw)
     if arr.ndim == 2 and arr.shape[0] == 1:
         arr = arr[0, :]
@@ -108,20 +107,25 @@ def generate_pdf(input_data, prediction, shap_values_1d, features):
         "ca": "Major Vessels Coloured (0–4)",
         "thal": "Thalassemia (0=Normal, 1=Fixed, 2=Reversible)"
     }
+
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter)
     styles = getSampleStyleSheet()
     elements = []
+
     elements.append(Paragraph("Heart Disease Risk Assessment Report", styles['Title']))
     elements.append(Spacer(1, 12))
+
     elements.append(Paragraph("<b>Input Data:</b>", styles['Heading2']))
     for key, value in input_data.items():
         label = field_names.get(key, key)
         elements.append(Paragraph(f"{label}: {value}", styles['Normal']))
     elements.append(Spacer(1, 12))
+
     elements.append(Paragraph(f"<b>Predicted Risk:</b> {round(prediction, 2)}%", styles['Heading2']))
     elements.append(Paragraph(f"Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
     elements.append(Spacer(1, 20))
+
     elements.append(Paragraph("<b>Feature Contributions (SHAP Analysis)</b>", styles['Heading2']))
     shap_df = pd.DataFrame({
         "Code": features,
@@ -129,6 +133,7 @@ def generate_pdf(input_data, prediction, shap_values_1d, features):
         "Value": [input_data[f] for f in features],
         "SHAP": shap_values_1d
     }).sort_values("SHAP", key=abs, ascending=False)
+
     table_data = [["Code", "Feature", "Value", "SHAP Impact"]]
     for _, row in shap_df.iterrows():
         shap_val = float(row["SHAP"])
@@ -138,6 +143,7 @@ def generate_pdf(input_data, prediction, shap_values_1d, features):
             row["Value"],
             Paragraph(f'<font color="{ "red" if shap_val > 0 else "blue" }">{shap_val:.3f}</font>', styles['Normal'])
         ])
+
     table = Table(table_data, hAlign='LEFT', colWidths=[50, 250, 50, 80])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
@@ -147,6 +153,7 @@ def generate_pdf(input_data, prediction, shap_values_1d, features):
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
     ]))
     elements.append(table)
+
     doc.build(elements)
     buffer.seek(0)
     return buffer
@@ -201,12 +208,11 @@ if st.session_state.current_q < len(questions):
             st.warning(f"Please enter a valid value. {e}")
 
 else:
-    # Prepare model input in the correct feature order
+    # Prepare model input
     inputs = [st.session_state.answers[k] for k in FEATURE_ORDER]
     input_scaled = scaler.transform([inputs])
     prediction = model.predict_proba(input_scaled)[0][1] * 100
 
-    # Risk message
     st.success(f"🧠 Your predicted heart disease risk is {round(prediction, 2)}%.")
     if prediction > 70:
         st.warning("⚠ High risk! Please consult a doctor.")
@@ -223,37 +229,32 @@ else:
     _ax1.axis("equal")
     st.pyplot(fig1)
 
-    # -----------------------------
-    # SHAP explainability
-    # -----------------------------
     # --- SHAP explainability ---
-st.markdown("### 🧠 Feature Contributions (Explainability)")
-try:
-    shap_raw = explainer(input_scaled)
-except Exception:
-    shap_raw = explainer.shap_values(input_scaled)
+    st.markdown("### 🧠 Feature Contributions (Explainability)")
+    try:
+        shap_raw = explainer(input_scaled)
+    except Exception:
+        shap_raw = explainer.shap_values(input_scaled)
 
-shap_1d = shap_to_1d(shap_raw)
+    shap_1d = shap_to_1d(shap_raw)
 
-# Build full DataFrame with all 13 features
-shap_df = pd.DataFrame({
-    "feature": FEATURE_ORDER,
-    "value": [st.session_state.answers[k] for k in FEATURE_ORDER],
-    "shap": shap_1d
-}).sort_values("shap", key=abs, ascending=False)
+    shap_df = pd.DataFrame({
+        "feature": FEATURE_ORDER,
+        "value": [st.session_state.answers[k] for k in FEATURE_ORDER],
+        "shap": shap_1d
+    }).sort_values("shap", key=abs, ascending=False)
 
-# Plot
-fig2, ax2 = plt.subplots(figsize=(8, 5))
-ax2.barh(shap_df["feature"], shap_df["shap"],
-         color=["red" if x > 0 else "blue" for x in shap_df["shap"]])
-ax2.set_xlabel("SHAP Value (Impact on Prediction)")
-ax2.set_title("Top Feature Influences on Risk")
-ax2.invert_yaxis()
-st.pyplot(fig2)
+    fig2, ax2 = plt.subplots(figsize=(8, 5))
+    ax2.barh(shap_df["feature"], shap_df["shap"],
+             color=["red" if x > 0 else "blue" for x in shap_df["shap"]])
+    ax2.set_xlabel("SHAP Value (Impact on Prediction)")
+    ax2.set_title("Top Feature Influences on Risk")
+    ax2.invert_yaxis()
+    st.pyplot(fig2)
 
-# PDF report (pass shap_1d directly)
-pdf = generate_pdf(st.session_state.answers, prediction,
-                   np.asarray(shap_1d, dtype=float),
-                   FEATURE_ORDER)
-st.download_button("📄 Download PDF Report", data=pdf,
-                   file_name="heart_risk_report.pdf", mime="application/pdf")
+    # PDF
+    pdf = generate_pdf(st.session_state.answers, prediction,
+                       np.asarray(shap_1d, dtype=float),
+                       FEATURE_ORDER)
+    st.download_button("📄 Download PDF Report", data=pdf,
+                       file_name="heart_risk_report.pdf", mime="application/pdf")
