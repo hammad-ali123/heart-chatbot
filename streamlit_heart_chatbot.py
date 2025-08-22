@@ -56,12 +56,9 @@ model = joblib.load("model.pkl")     # LogisticRegression (or your chosen model)
 scaler = joblib.load("scaler.pkl")   # Typically StandardScaler
 
 # -----------------------------
-# SHAP explainer (fix)
+# SHAP explainer
 # -----------------------------
-# Zero-centred background in model input space (scaled).
 zero_background = np.zeros((1, N_FEATURES))
-
-# Try unified API first; fall back to LinearExplainer for older SHAP.
 try:
     masker = shap.maskers.Independent(zero_background)
     explainer = shap.Explainer(model, masker)
@@ -69,36 +66,22 @@ except Exception:
     explainer = shap.LinearExplainer(model, zero_background)
 
 def shap_to_1d(shap_raw):
-    """
-    Normalize SHAP output to a 1-D numpy array (length = n_features).
-    Handles:
-      - shap.Explanation with .values shape (1, n_features) or (1, 2, n_features)
-      - list outputs (e.g., [class0, class1]) -> picks class 1 if present
-      - ndarray of shape (1, n_features) / (n_features,)
-    Returns float dtype.
-    """
     import numpy as np
-
-    # Explanation object path
     if hasattr(shap_raw, "values"):
         vals = np.array(shap_raw.values)
         if vals.ndim == 3 and vals.shape[0] == 1 and vals.shape[1] >= 2:
-            out = vals[0, 1, :]  # class 1
+            out = vals[0, 1, :]
         elif vals.ndim == 2 and vals.shape[0] == 1:
             out = vals[0, :]
         else:
             out = vals.reshape(-1)
         return out.astype(float)
-
-    # list path (legacy: [arr_class0, arr_class1])
     if isinstance(shap_raw, list) and len(shap_raw) > 0:
         arr = shap_raw[1] if len(shap_raw) > 1 else shap_raw[0]
         arr = np.array(arr)
         if arr.ndim == 2 and arr.shape[0] == 1:
             arr = arr[0, :]
         return arr.reshape(-1).astype(float)
-
-    # ndarray path
     arr = np.array(shap_raw)
     if arr.ndim == 2 and arr.shape[0] == 1:
         arr = arr[0, :]
@@ -123,29 +106,20 @@ def generate_pdf(input_data, prediction, shap_values_1d, features):
         "ca": "Major Vessels Coloured (0–4)",
         "thal": "Thalassemia (0=Normal, 1=Fixed, 2=Reversible)"
     }
-
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter)
     styles = getSampleStyleSheet()
     elements = []
-
-    # Title
     elements.append(Paragraph("Heart Disease Risk Assessment Report", styles['Title']))
     elements.append(Spacer(1, 12))
-
-    # Input data
     elements.append(Paragraph("<b>Input Data:</b>", styles['Heading2']))
     for key, value in input_data.items():
         label = field_names.get(key, key)
         elements.append(Paragraph(f"{label}: {value}", styles['Normal']))
     elements.append(Spacer(1, 12))
-
-    # Prediction
     elements.append(Paragraph(f"<b>Predicted Risk:</b> {round(prediction, 2)}%", styles['Heading2']))
     elements.append(Paragraph(f"Date/Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
     elements.append(Spacer(1, 20))
-
-    # SHAP breakdown table
     elements.append(Paragraph("<b>Feature Contributions (SHAP Analysis)</b>", styles['Heading2']))
     shap_df = pd.DataFrame({
         "Code": features,
@@ -153,7 +127,6 @@ def generate_pdf(input_data, prediction, shap_values_1d, features):
         "Value": [input_data[f] for f in features],
         "SHAP": shap_values_1d
     }).sort_values("SHAP", key=abs, ascending=False)
-
     table_data = [["Code", "Feature", "Value", "SHAP Impact"]]
     for _, row in shap_df.iterrows():
         shap_val = float(row["SHAP"])
@@ -163,7 +136,6 @@ def generate_pdf(input_data, prediction, shap_values_1d, features):
             row["Value"],
             Paragraph(f'<font color="{ "red" if shap_val > 0 else "blue" }">{shap_val:.3f}</font>', styles['Normal'])
         ])
-
     table = Table(table_data, hAlign='LEFT', colWidths=[50, 250, 50, 80])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
@@ -173,7 +145,6 @@ def generate_pdf(input_data, prediction, shap_values_1d, features):
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
     ]))
     elements.append(table)
-
     doc.build(elements)
     buffer.seek(0)
     return buffer
@@ -234,7 +205,7 @@ else:
     prediction = model.predict_proba(input_scaled)[0][1] * 100
 
     # Risk message
-    st.success(f"🧠 Your predicted heart disease risk is *{round(prediction, 2)}%*.")
+    st.success(f"🧠 Your predicted heart disease risk is {round(prediction, 2)}%.")
     if prediction > 70:
         st.warning("⚠ High risk! Please consult a doctor.")
     elif prediction > 40:
@@ -250,50 +221,46 @@ else:
     _ax1.axis("equal")
     st.pyplot(fig1)
 
- # SHAP explainability (robust + length-aligned)
-st.markdown("### 🧠 Feature Contributions (Explainability)")
-try:
-    shap_raw = explainer(input_scaled)
-except Exception:
-    shap_raw = explainer.shap_values(input_scaled)
-
-shap_1d = shap_to_1d(shap_raw)
-
-# --- Align SHAP vector length to features (defensive against backend quirks) ---
-n_feat = len(FEATURE_ORDER)
-if shap_1d.ndim != 1:
-    shap_1d = np.ravel(shap_1d)
-
-if len(shap_1d) > n_feat:
-    # If a multi-output explanation got flattened, try to reshape to (-1, n_feat) and take the last row (class 1).
+    # -----------------------------
+    # SHAP explainability
+    # -----------------------------
+    st.markdown("### 🧠 Feature Contributions (Explainability)")
     try:
-        shap_1d = shap_1d.reshape(-1, n_feat)[-1]
+        shap_raw = explainer(input_scaled)
     except Exception:
-        shap_1d = shap_1d[:n_feat]
-elif len(shap_1d) < n_feat:
-    # Pad with zeros (shouldn't happen, but safe)
-    shap_1d = np.pad(shap_1d, (0, n_feat - len(shap_1d)), mode="constant")
+        shap_raw = explainer.shap_values(input_scaled)
 
-# Build rows one-by-one to avoid length mismatch issues
-rows = []
-for i, feat in enumerate(FEATURE_ORDER):
-    rows.append({
-        "feature": feat,
-        "value": st.session_state.answers[feat],
-        "shap": float(shap_1d[i])
-    })
-shap_df = pd.DataFrame(rows).sort_values("shap", key=abs, ascending=False)
+    shap_1d = shap_to_1d(shap_raw)
 
-# Plot
-fig2, ax2 = plt.subplots(figsize=(8, 5))
-ax2.barh(shap_df["feature"], shap_df["shap"],
-         color=["red" if x > 0 else "blue" for x in shap_df["shap"]])
-ax2.set_xlabel("SHAP Value (Impact on Prediction)")
-ax2.set_title("Top Feature Influences on Risk")
-ax2.invert_yaxis()
-st.pyplot(fig2)
+    n_feat = len(FEATURE_ORDER)
+    if shap_1d.ndim != 1:
+        shap_1d = np.ravel(shap_1d)
+    if len(shap_1d) > n_feat:
+        try:
+            shap_1d = shap_1d.reshape(-1, n_feat)[-1]
+        except Exception:
+            shap_1d = shap_1d[:n_feat]
+    elif len(shap_1d) < n_feat:
+        shap_1d = np.pad(shap_1d, (0, n_feat - len(shap_1d)), mode="constant")
 
-# PDF download with SHAP table (use the aligned vector)
-pdf = generate_pdf(st.session_state.answers, prediction, np.asarray(shap_1d, dtype=float), FEATURE_ORDER)
-st.download_button("📄 Download PDF Report", data=pdf,
-                   file_name="heart_risk_report.pdf", mime="application/pdf")
+    rows = []
+    for i, feat in enumerate(FEATURE_ORDER):
+        rows.append({
+            "feature": feat,
+            "value": st.session_state.answers[feat],
+            "shap": float(shap_1d[i])
+        })
+    shap_df = pd.DataFrame(rows).sort_values("shap", key=abs, ascending=False)
+
+    fig2, ax2 = plt.subplots(figsize=(8, 5))
+    ax2.barh(shap_df["feature"], shap_df["shap"],
+             color=["red" if x > 0 else "blue" for x in shap_df["shap"]])
+    ax2.set_xlabel("SHAP Value (Impact on Prediction)")
+    ax2.set_title("Top Feature Influences on Risk")
+    ax2.invert_yaxis()
+    st.pyplot(fig2)
+
+    # PDF download with SHAP table
+    pdf = generate_pdf(st.session_state.answers, prediction, np.asarray(shap_1d, dtype=float), FEATURE_ORDER)
+    st.download_button("📄 Download PDF Report", data=pdf,
+                       file_name="heart_risk_report.pdf", mime="application/pdf")
