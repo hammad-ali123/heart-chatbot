@@ -52,49 +52,57 @@ N_FEATURES = len(FEATURE_ORDER)
 # -----------------------------
 # Load model & scaler
 # -----------------------------
-model = joblib.load("model.pkl")     # LogisticRegression
+model = joblib.load("model.pkl")     # LogisticRegression (or your chosen model)
 scaler = joblib.load("scaler.pkl")   # Typically StandardScaler
 
 # -----------------------------
 # SHAP explainer (fix)
 # -----------------------------
-# We use a zero-centred background in model input space.
-# If you used StandardScaler, a zero vector corresponds to average (mean) patient.
-# This keeps explanations stable without needing training data here.
+# Zero-centred background in model input space (scaled).
 zero_background = np.zeros((1, N_FEATURES))
 
-# Try the unified API first; fall back to LinearExplainer for older SHAP.
+# Try unified API first; fall back to LinearExplainer for older SHAP.
 try:
     masker = shap.maskers.Independent(zero_background)
     explainer = shap.Explainer(model, masker)
 except Exception:
-    # Older SHAP versions: LinearExplainer(model, background)
     explainer = shap.LinearExplainer(model, zero_background)
 
-def normalise_shap_values(shap_out):
+def shap_to_1d(shap_raw):
     """
-    Return a 1D numpy array for the first (and only) sample's SHAP values,
-    regardless of SHAP version/backend.
+    Normalize SHAP output to a 1-D numpy array (length = n_features).
+    Handles:
+      - shap.Explanation with .values shape (1, n_features) or (1, 2, n_features)
+      - list outputs (e.g., [class0, class1]) -> picks class 1 if present
+      - ndarray of shape (1, n_features) / (n_features,)
+    Returns float dtype.
     """
-    # Newer SHAP: explainer(X) returns an Explanation object
-    if hasattr(shap_out, "values") and hasattr(shap_out, "data"):
-        # shap_out.values shape: (n_samples, n_features)
-        return np.array(shap_out.values[0], dtype=float)
+    import numpy as np
 
-    # Older SHAP .shap_values(...) might return:
-    # - np.ndarray of shape (n_samples, n_features)
-    # - list of arrays (multiclass). For binary logistic regression,
-    #   we typically get a single array.
-    if isinstance(shap_out, np.ndarray):
-        if shap_out.ndim == 2 and shap_out.shape[0] >= 1:
-            return np.array(shap_out[0], dtype=float)
-        raise ValueError("Unexpected SHAP ndarray shape.")
-    if isinstance(shap_out, list) and len(shap_out) > 0:
-        arr = shap_out[0]
-        if isinstance(arr, np.ndarray):
-            if arr.ndim == 2 and arr.shape[0] >= 1:
-                return np.array(arr[0], dtype=float)
-    raise ValueError("Unrecognised SHAP output format.")
+    # Explanation object path
+    if hasattr(shap_raw, "values"):
+        vals = np.array(shap_raw.values)
+        if vals.ndim == 3 and vals.shape[0] == 1 and vals.shape[1] >= 2:
+            out = vals[0, 1, :]  # class 1
+        elif vals.ndim == 2 and vals.shape[0] == 1:
+            out = vals[0, :]
+        else:
+            out = vals.reshape(-1)
+        return out.astype(float)
+
+    # list path (legacy: [arr_class0, arr_class1])
+    if isinstance(shap_raw, list) and len(shap_raw) > 0:
+        arr = shap_raw[1] if len(shap_raw) > 1 else shap_raw[0]
+        arr = np.array(arr)
+        if arr.ndim == 2 and arr.shape[0] == 1:
+            arr = arr[0, :]
+        return arr.reshape(-1).astype(float)
+
+    # ndarray path
+    arr = np.array(shap_raw)
+    if arr.ndim == 2 and arr.shape[0] == 1:
+        arr = arr[0, :]
+    return arr.reshape(-1).astype(float)
 
 # -----------------------------
 # PDF generator with SHAP table
@@ -242,14 +250,13 @@ else:
     _ax1.axis("equal")
     st.pyplot(fig1)
 
-    # SHAP explainability (fixed)
+    # SHAP explainability (robust 1-D)
     st.markdown("### 🧠 Feature Contributions (Explainability)")
-    # Try unified API call first; if it fails, fall back to .shap_values(...)
     try:
         shap_raw = explainer(input_scaled)
     except Exception:
         shap_raw = explainer.shap_values(input_scaled)
-    shap_1d = normalise_shap_values(shap_raw)
+    shap_1d = shap_to_1d(shap_raw)
 
     shap_df = pd.DataFrame({
         "feature": FEATURE_ORDER,
